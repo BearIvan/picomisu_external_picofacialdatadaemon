@@ -122,17 +122,19 @@ void FacialTrackingSocket::Control()
     // dropped a live client). MARCO is sent every 25 s, every second while the algorithm is not
     // running (to keep the module waiting while the headset sleeps).
     auto lastReply = std::chrono::steady_clock::now();
-    auto lastPing = std::chrono::steady_clock::time_point::min();
+    bool pinged = false;
+    auto lastPing = lastReply;
 
     while (this->connected.load())
     {
         auto now = std::chrono::steady_clock::now();
         auto interval = this->active.load() ? PING_INTERVAL : PING_INTERVAL_INACTIVE;
 
-        if (now - lastPing >= interval)
+        if (!pinged || now - lastPing >= interval)
         {
             send(this->facialDataSocket, PING, sizeof(PING), 0);
             lastPing = now;
+            pinged = true;
         }
 
         if (now - lastReply > PING_INTERVAL + PING_TIMEOUT)
