@@ -4,12 +4,25 @@
 #include <binder/IServiceManager.h>
 #include <sys/mman.h>
 
+#include "log.hpp"
 #include "pvr/pxr-eye-tracking-service.hpp"
+
+// checkService does not block: the service is missing while it restarts (it crashes around
+// sleep/wake), and a null binder must not be dereferenced.
+static sp<IBinder> GetEyeTrackingService()
+{
+    sp<IServiceManager> sm = defaultServiceManager();
+    if (sm == nullptr)
+        return nullptr;
+
+    return sm->checkService(String16(SERVICE));
+}
 
 status_t PxrEyeTrackingService::SetTrackingMode(int mode)
 {
-    sp<IServiceManager> sm = defaultServiceManager();
-    sp<IBinder> eyeTrackingBinder = sm->getService(String16(SERVICE));
+    sp<IBinder> eyeTrackingBinder = GetEyeTrackingService();
+    if (eyeTrackingBinder == nullptr)
+        return DEAD_OBJECT;
 
     Parcel message;
     Parcel reply;
@@ -29,10 +42,11 @@ status_t PxrEyeTrackingService::SetTrackingMode(int mode)
     return reply.readInt32();
 }
 
-status_t PxrEyeTrackingService::GetTrackingDataSharedMemory(int type, int *fd, void **memory)
+status_t PxrEyeTrackingService::GetTrackingDataSharedMemory(int type, int *fd, void **memory, size_t *size)
 {
-    sp<IServiceManager> sm = defaultServiceManager();
-    sp<IBinder> eyeTrackingBinder = sm->getService(String16(SERVICE));
+    sp<IBinder> eyeTrackingBinder = GetEyeTrackingService();
+    if (eyeTrackingBinder == nullptr)
+        return DEAD_OBJECT;
 
     Parcel message;
     Parcel reply;
@@ -72,35 +86,35 @@ status_t PxrEyeTrackingService::GetTrackingDataSharedMemory(int type, int *fd, v
     if (memorySize <= 0)
         return FAILED_TRANSACTION;
 
-    int fdSharedMemory = uniqueFd.get();
-    *fd = fdSharedMemory;
-
     void *sharedMemory = mmap(
         nullptr,
         memorySize,
         PROT_READ,
         MAP_SHARED,
-        fdSharedMemory,
+        uniqueFd.get(),
         0);
 
     if (sharedMemory == MAP_FAILED)
         return FAILED_TRANSACTION;
 
+    *fd = uniqueFd.release();
     *memory = sharedMemory;
+    *size = memorySize;
 
     return OK;
 }
 
 status_t PxrEyeTrackingService::AddServiceListener(sp<IBinder> binder)
 {
-    sp<IServiceManager> sm = defaultServiceManager();
-    sp<IBinder> eyeTrackingBinder = sm->getService(String16(SERVICE));
+    sp<IBinder> eyeTrackingBinder = GetEyeTrackingService();
+    if (eyeTrackingBinder == nullptr)
+        return DEAD_OBJECT;
 
     Parcel message;
     Parcel reply;
 
     message.writeInterfaceToken(String16(DESCRIPTOR));
-    status_t sbStatus = message.writeStrongBinder(binder);
+    message.writeStrongBinder(binder);
 
     status_t binderStatus = eyeTrackingBinder->transact(
         ADD_SERVICE_LISTENER,
@@ -116,8 +130,9 @@ status_t PxrEyeTrackingService::AddServiceListener(sp<IBinder> binder)
 
 status_t PxrEyeTrackingService::StartAlgorithm(int camera, int parameters, int timeoutMs)
 {
-    sp<IServiceManager> sm = defaultServiceManager();
-    sp<IBinder> eyeTrackingBinder = sm->getService(String16(SERVICE));
+    sp<IBinder> eyeTrackingBinder = GetEyeTrackingService();
+    if (eyeTrackingBinder == nullptr)
+        return DEAD_OBJECT;
 
     Parcel message;
     Parcel reply;
@@ -152,8 +167,9 @@ status_t PxrEyeTrackingService::StartAlgorithm(int camera, int parameters, int t
 
 status_t PxrEyeTrackingService::StopAlgorithm(int camera, int parameters)
 {
-    sp<IServiceManager> sm = defaultServiceManager();
-    sp<IBinder> eyeTrackingBinder = sm->getService(String16(SERVICE));
+    sp<IBinder> eyeTrackingBinder = GetEyeTrackingService();
+    if (eyeTrackingBinder == nullptr)
+        return DEAD_OBJECT;
 
     Parcel message;
     Parcel reply;

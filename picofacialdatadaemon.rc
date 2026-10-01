@@ -1,0 +1,7 @@
+# Picomisu Source: eye and face tracking data over UDP (VRCFaceTracking PicoFacialDataModule).
+# The daemon reconnects by itself when pxreyetrackingservice restarts or the headset wakes up.
+service picofacialdatadaemon /system/bin/picofacialdatadaemon
+    class late_start
+    user system
+    group system inet
+    writepid /dev/cpuset/system-background/tasks

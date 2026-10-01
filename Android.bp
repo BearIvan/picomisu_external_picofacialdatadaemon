@@ -1,0 +1,28 @@
+// Picomisu Source: picofacialdatadaemon as a system service (see picofacialdatadaemon.rc).
+// Builds against the platform libraries; lib/ (prebuilt device copies) and third_party/
+// (header submodules) are only used by the upstream NDK build.
+
+cc_binary {
+    name: "picofacialdatadaemon",
+    srcs: [
+        "src/main.cpp",
+        "src/pvr/pxr-eye-tracking-service.cpp",
+        "src/facial-tracking-socket.cpp",
+        "src/facial-tracking.cpp",
+        "src/data-buffer.cpp",
+    ],
+    local_include_dirs: ["include"],
+    shared_libs: [
+        "libbase",
+        "libbinder",
+        "libcutils",
+        "liblog",
+        "libutils",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+    init_rc: ["picofacialdatadaemon.rc"],
+}

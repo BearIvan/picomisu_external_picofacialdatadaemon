@@ -11,6 +11,11 @@
 #include <ifaddrs.h>
 #include <linux/if.h>
 #include <vector>
+#include <atomic>
+#include <cerrno>
+#include <cstring>
+#include <signal.h>
+#include <string_view>
 
 #include "facial-tracking.hpp"
 
@@ -36,22 +41,25 @@ private:
      * Adding a service listener doesn't work, so this is a stand-in replacement.
      */
     void Poll(std::chrono::nanoseconds pollInterval);
-    bool Send();
+    /**
+     * @returns 1 if a sample was sent, 0 if there was nothing to send, -1 on a socket error.
+     */
+    int Send();
     void Ping();
     void WaitForStop();
 
     void RegisterSigKillHandler();
     static void SigKillHandler(int signalNumber);
 
-    sockaddr_in Discover();
+    bool Discover(sockaddr_in *client);
     void SetupClientSocket();
 
-    int facialDataSocket;
-    std::atomic<bool> connected;
-    std::atomic<bool> active;
-    std::atomic<bool> kill;
+    int facialDataSocket = -1;
+    std::atomic<bool> connected{false};
+    std::atomic<bool> active{false};
+    std::atomic<bool> kill{false};
 
-    std::atomic<bool> stopThreadRunning;
+    std::atomic<bool> stopThreadRunning{false};
     std::condition_variable cv;
     std::mutex cvMutex;
 

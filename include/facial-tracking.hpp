@@ -60,11 +60,20 @@ public:
     FacialTracking();
     bool Start();
     bool Stop();
-    void GetFacialData(PxrFTInfo **faceTrackingData, pxr_eyepose_data_v2_0 **eyeTrackingData);
+    /**
+     * @returns true if there is data to send: a new sample of either stream, together with the
+     * latest sample of the other one.
+     */
+    bool GetFacialData(PxrFTInfo **faceTrackingData, pxr_eyepose_data_v2_0 **eyeTrackingData);
 
 private:
+    void CloseBuffers();
+
     sp<IBinder> eyeTrackingServiceListener;
 
-    DataBuffer *faceTrackingDataBuffer;
-    DataBuffer *eyeTrackingDataBuffer;
+    DataBuffer *faceTrackingDataBuffer = nullptr;
+    DataBuffer *eyeTrackingDataBuffer = nullptr;
+
+    PxrFTInfo *lastFaceTrackingData = nullptr;
+    pxr_eyepose_data_v2_0 *lastEyeTrackingData = nullptr;
 };

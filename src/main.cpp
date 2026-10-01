@@ -1,5 +1,7 @@
 #include <binder/ProcessState.h>
 
+#include <cstring>
+
 #include "facial-tracking-socket.hpp"
 
 int detach()
@@ -15,14 +17,18 @@ int detach()
     return EXIT_SUCCESS;
 }
 
-int main()
+int main(int argc, char **argv)
 {
-    int pid = detach();
-
-    if (pid > 0)
+    // init runs the service in the foreground; --daemon detaches for a manual start from a shell.
+    if (argc > 1 && strcmp(argv[1], "--daemon") == 0)
     {
-        printf("Daemon started on PID: %d\n", pid);
-        return EXIT_SUCCESS;
+        int pid = detach();
+
+        if (pid > 0)
+        {
+            printf("Daemon started on PID: %d\n", pid);
+            return EXIT_SUCCESS;
+        }
     }
 
     android::ProcessState::self()->startThreadPool();
