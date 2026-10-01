@@ -42,11 +42,11 @@ private:
      */
     void Poll(std::chrono::nanoseconds pollInterval);
     /**
-     * @returns 1 if a sample was sent, 0 if there was nothing to send, -1 on a socket error.
+     * @returns 1 if a sample was sent, 2 if a new sample waits for the send interval, 0 if there
+     * was nothing new, -1 on a socket error.
      */
     int Send();
-    void Ping();
-    void WaitForStop();
+    void Control();
 
     void RegisterSigKillHandler();
     static void SigKillHandler(int signalNumber);
@@ -59,9 +59,7 @@ private:
     std::atomic<bool> active{false};
     std::atomic<bool> kill{false};
 
-    std::atomic<bool> stopThreadRunning{false};
-    std::condition_variable cv;
-    std::mutex cvMutex;
+    std::chrono::steady_clock::time_point lastSend{};
 
     FacialTracking *facialTracking;
 };

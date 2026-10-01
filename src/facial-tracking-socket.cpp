@@ -3,6 +3,11 @@
 #include "log.hpp"
 #include "facial-tracking-socket.hpp"
 
+static constexpr std::chrono::seconds PING_INTERVAL(25);
+static constexpr std::chrono::seconds PING_INTERVAL_INACTIVE(1);
+static constexpr std::chrono::seconds PING_TIMEOUT(5);
+static constexpr std::chrono::milliseconds MIN_SEND_INTERVAL(30);
+
 // No new sample for this long means that the algorithm stopped: the headset went to sleep
 // (pxreyetrackingservice stops the algorithm then) or the service restarted, which unmaps the
 // old shared memory. The algorithm is started again until it succeeds.
@@ -40,16 +45,17 @@ void FacialTrackingSocket::Listen()
             continue;
         }
 
+        // Control() polls the socket with this timeout.
         struct timeval tv;
-        tv.tv_sec = 5;
-        tv.tv_usec = 0;
+        tv.tv_sec = 0;
+        tv.tv_usec = 500 * 1000;
         setsockopt(this->facialDataSocket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
 
         connect(this->facialDataSocket, (struct sockaddr *)&client, sizeof(client));
         this->connected.store(true);
         this->active.store(false);
 
-        std::thread pingThread(&FacialTrackingSocket::Ping, this);
+        std::thread controlThread(&FacialTrackingSocket::Control, this);
 
         // Blocking: starts the algorithm (again after sleep or a service restart) and sends data
         // until the ping thread detects no reply anymore or the client sends STOP.
@@ -58,8 +64,8 @@ void FacialTrackingSocket::Listen()
         this->facialTracking->Stop();
         this->active.store(false);
 
-        if (pingThread.joinable())
-            pingThread.join();
+        if (controlThread.joinable())
+            controlThread.join();
 
         close(this->facialDataSocket);
         this->facialDataSocket = -1;
@@ -109,80 +115,52 @@ void FacialTrackingSocket::Poll(std::chrono::nanoseconds pollInterval)
     }
 }
 
-void FacialTrackingSocket::Ping()
+void FacialTrackingSocket::Control()
 {
+    // The only reader of the client socket: answers to MARCO and STOP are both handled here, so a
+    // POLO can no longer be consumed by a separate STOP reader (which made the ping fail and
+    // dropped a live client). MARCO is sent every 25 s, every second while the algorithm is not
+    // running (to keep the module waiting while the headset sleeps).
+    auto lastReply = std::chrono::steady_clock::now();
+    auto lastPing = std::chrono::steady_clock::time_point::min();
+
     while (this->connected.load())
     {
-        bool pingReceived = false;
-        for (int i = 0; i < 5; i++)
+        auto now = std::chrono::steady_clock::now();
+        auto interval = this->active.load() ? PING_INTERVAL : PING_INTERVAL_INACTIVE;
+
+        if (now - lastPing >= interval)
         {
             send(this->facialDataSocket, PING, sizeof(PING), 0);
-
-            char buffer[128];
-            ssize_t bytesRead = recv(this->facialDataSocket, buffer, sizeof(buffer), 0);
-
-            if (bytesRead > 0)
-            {
-                if (std::string_view(buffer, bytesRead) == REPLY)
-                {
-                    pingReceived = true;
-                }
-                else if (std::string_view(buffer, bytesRead) == DAEMON_STOP)
-                {
-                    this->connected.store(false);
-
-                    return;
-                }
-
-                break;
-            }
+            lastPing = now;
         }
 
-        if (!pingReceived)
+        if (now - lastReply > PING_INTERVAL + PING_TIMEOUT)
         {
+            LOGI("Client did not answer the ping");
             this->connected.store(false);
             return;
         }
 
-        this->stopThreadRunning.store(true);
+        char buffer[128];
+        ssize_t bytesRead = recv(this->facialDataSocket, buffer, sizeof(buffer), 0);
+        if (bytesRead <= 0)
+            continue;
 
-        // While we wait, we spin up a STOP thread if the module sends STOP we can then immediately stop.
-        std::thread stopThread(&FacialTrackingSocket::WaitForStop, this);
+        std::string_view message(buffer, bytesRead);
+        while (!message.empty() && message.back() == '\0')
+            message.remove_suffix(1);
 
-        // Ping every second when we are waiting for the headset to wake up, to keep the module active.
-        std::this_thread::sleep_for(
-            this->active.load() ? std::chrono::seconds(25) : std::chrono::seconds(1));
-
-        // Once we are done, stop the thread that waits for a STOP signal.
-        this->stopThreadRunning.store(false);
-        this->cv.notify_all();
-
-        if (stopThread.joinable())
-            stopThread.join();
-    }
-}
-
-void FacialTrackingSocket::WaitForStop()
-{
-    while (this->stopThreadRunning.load())
-    {
-        char buffer[4];
-        ssize_t bytesRead = recv(this->facialDataSocket, buffer, sizeof(buffer), MSG_DONTWAIT);
-
-        if (bytesRead > 0 && std::string_view(buffer, bytesRead) == DAEMON_STOP)
+        if (message == REPLY)
         {
-            this->connected = false;
-
+            lastReply = std::chrono::steady_clock::now();
+        }
+        else if (message == DAEMON_STOP)
+        {
+            LOGI("Client sent STOP");
+            this->connected.store(false);
             return;
         }
-
-        std::unique_lock<std::mutex> lock(this->cvMutex);
-
-        bool stopped = this->cv.wait_for(lock, std::chrono::milliseconds(500), [this]
-                                         { return !this->stopThreadRunning.load(); });
-
-        if (stopped)
-            break;
     }
 }
 
@@ -193,6 +171,16 @@ int FacialTrackingSocket::Send()
 
     if (!this->facialTracking->GetFacialData(&faceTrackingData, &eyeTrackingData))
         return 0;
+
+    // Face and eye samples arrive separately at about 25 Hz each; send at most one packet per
+    // MIN_SEND_INTERVAL (the latest of both), as the upstream rate, not one per stream.
+    auto now = std::chrono::steady_clock::now();
+    if (now - this->lastSend < MIN_SEND_INTERVAL)
+    {
+        this->facialTracking->KeepPending();
+        return 2;
+    }
+    this->lastSend = now;
 
     struct iovec iov[2];
     iov[0].iov_base = faceTrackingData;

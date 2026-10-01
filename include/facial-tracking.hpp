@@ -65,6 +65,10 @@ public:
      * latest sample of the other one.
      */
     bool GetFacialData(PxrFTInfo **faceTrackingData, pxr_eyepose_data_v2_0 **eyeTrackingData);
+    /**
+     * The data returned by GetFacialData was not sent; return it again on the next call.
+     */
+    void KeepPending();
 
 private:
     void CloseBuffers();
@@ -76,4 +80,5 @@ private:
 
     PxrFTInfo *lastFaceTrackingData = nullptr;
     pxr_eyepose_data_v2_0 *lastEyeTrackingData = nullptr;
+    bool pending = false;
 };

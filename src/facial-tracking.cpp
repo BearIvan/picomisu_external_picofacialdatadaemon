@@ -65,6 +65,12 @@ void FacialTracking::CloseBuffers()
     // These point into the unmapped shared memory.
     this->lastFaceTrackingData = nullptr;
     this->lastEyeTrackingData = nullptr;
+    this->pending = false;
+}
+
+void FacialTracking::KeepPending()
+{
+    this->pending = true;
 }
 
 bool FacialTracking::Start()
@@ -128,9 +134,13 @@ bool FacialTracking::GetFacialData(PxrFTInfo **faceTrackingData, pxr_eyepose_dat
     if (eye != nullptr)
         this->lastEyeTrackingData = eye;
 
-    // Send as soon as either stream has a new sample, with the latest sample of the other one.
-    if ((face == nullptr && eye == nullptr) || this->lastFaceTrackingData == nullptr || this->lastEyeTrackingData == nullptr)
+    // Send as soon as either stream has a new sample (or one is pending), with the latest
+    // sample of the other one.
+    bool hasNew = face != nullptr || eye != nullptr || this->pending;
+    if (!hasNew || this->lastFaceTrackingData == nullptr || this->lastEyeTrackingData == nullptr)
         return false;
+
+    this->pending = false;
 
     *faceTrackingData = this->lastFaceTrackingData;
     *eyeTrackingData = this->lastEyeTrackingData;
